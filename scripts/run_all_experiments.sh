@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/gpu_utils.sh"
+auto_setup
+
 # ============================================================================
 # SpecNoise: Master Experiment Orchestration
 # noise_search -> fisher_analysis -> noise_guided_sft (4x4x2) -> eval -> 27B
@@ -10,7 +15,6 @@ export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HOME="${HF_HOME:-/home/nwh/.cache/huggingface}"
 export TRANSFORMERS_CACHE="$HF_HOME/hub"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG="${PROJECT_DIR}/configs/noise_grid.yaml"
 RESULTS="${PROJECT_DIR}/results"
