@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ─── SpecNoise Search Launcher (8x A100-80GB) ───
+export HF_ENDPOINT='https://hf-mirror.com'
+export HF_HOME="${HF_HOME:-/home/nwh/.cache/huggingface}"
+export TRANSFORMERS_CACHE="$HF_HOME/hub"
+export WANDB_PROJECT="specnoise"
+export NCCL_P2P_DISABLE=0
+export NCCL_IB_DISABLE=0
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+CONFIG="${PROJECT_DIR}/configs/noise_grid.yaml"
+OUTPUT_DIR="${PROJECT_DIR}/results/noise_search"
+
+mkdir -p "$OUTPUT_DIR"
+
+NUM_GPUS=8
+MASTER_PORT="${MASTER_PORT:-29503}"
+
+echo "========================================="
+echo " SpecNoise Search"
+echo " GPUs: ${NUM_GPUS}"
+echo " Config: ${CONFIG}"
+echo " Output: ${OUTPUT_DIR}"
+echo "========================================="
+
+torchrun \
+    --nproc_per_node=${NUM_GPUS} \
+    --master_port=${MASTER_PORT} \
+    "${SCRIPT_DIR}/noise_search.py" \
+    --config_path "${CONFIG}" \
+    --output_dir "${OUTPUT_DIR}" \
+    "$@"
+
+echo ""
+echo "Noise search complete."
+echo "Run noise_guided_sft.py for Stage 2 and eval_noise_specialization.py for evaluation."
