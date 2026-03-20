@@ -27,10 +27,7 @@ echo " Config: ${CONFIG}"
 echo " Output: ${OUTPUT_DIR}"
 echo "========================================="
 
-torchrun \
-    --nproc_per_node=${NUM_GPUS} \
-    --master_port=${MASTER_PORT} \
-    "${SCRIPT_DIR}/noise_search.py" \
+python "${SCRIPT_DIR}/noise_search.py" \
     --config_path "${CONFIG}" \
     --output_dir "${OUTPUT_DIR}" \
     "$@"

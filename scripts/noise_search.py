@@ -110,6 +110,16 @@ def evaluate_all_subjects(model, tokenizer, subjects: list,
     return results
 
 
+def _noise_type_extra_kwargs_variants(noise_type: str, cfg: dict) -> list:
+    """Return a list of extra_kw dicts so each rank/top_k gets its own search run."""
+    ns = cfg["noise_search"]
+    if noise_type == "low_rank":
+        return [{"low_rank_rank": r} for r in ns["low_rank"]["ranks"]]
+    if noise_type == "svd_structured":
+        return [{"svd_top_k": k} for k in ns["svd_structured"]["top_k_singular"]]
+    return [{}]
+
+
 def run_grid_search(model, tokenizer, cfg, args):
     """Run full grid search over noise configurations."""
     noise_types = args.noise_types or cfg["noise_search"]["noise_types"]
@@ -129,81 +139,92 @@ def run_grid_search(model, tokenizer, cfg, args):
     all_results = {"baseline": baseline}
     best_configs = {}
 
-    total_configs = len(noise_types) * len(scales) * len(layer_group_names)
+    total_configs = (
+        sum(len(_noise_type_extra_kwargs_variants(nt, cfg)) for nt in noise_types)
+        * len(scales)
+        * len(layer_group_names)
+    )
     config_idx = 0
 
     for noise_type, scale, layer_group_name in product(noise_types, scales, layer_group_names):
-        config_idx += 1
-        logger.info(
-            "Config %d/%d: type=%s, scale=%.4f, layers=%s",
-            config_idx, total_configs, noise_type, scale, layer_group_name,
-        )
-
         layer_indices = cfg["noise_search"]["layer_groups"].get(layer_group_name)
 
-        extra_kwargs = {}
-        if noise_type == "low_rank":
-            for rank in cfg["noise_search"]["low_rank"]["ranks"]:
-                extra_kwargs["low_rank_rank"] = rank
-        if noise_type == "svd_structured":
-            for top_k in cfg["noise_search"]["svd_structured"]["top_k_singular"]:
-                extra_kwargs["svd_top_k"] = top_k
+        for extra_kwargs in _noise_type_extra_kwargs_variants(noise_type, cfg):
+            config_idx += 1
+            logger.info(
+                "Config %d/%d: type=%s, scale=%.4f, layers=%s, extra=%s",
+                config_idx,
+                total_configs,
+                noise_type,
+                scale,
+                layer_group_name,
+                repr(extra_kwargs),
+            )
 
-        noise_cfg = NoiseConfig(
-            noise_type=NoiseType(noise_type),
-            scale=scale,
-            layer_indices=layer_indices,
-            target_modules=target_modules,
-            low_rank_rank=extra_kwargs.get("low_rank_rank", 4),
-            svd_top_k=extra_kwargs.get("svd_top_k", 4),
-        )
+            noise_cfg = NoiseConfig(
+                noise_type=NoiseType(noise_type),
+                scale=scale,
+                layer_indices=layer_indices,
+                target_modules=target_modules,
+                low_rank_rank=extra_kwargs.get("low_rank_rank", 4),
+                svd_top_k=extra_kwargs.get("svd_top_k", 4),
+            )
 
-        model.load_state_dict(original_state)
+            suffix_parts = []
+            if "low_rank_rank" in extra_kwargs:
+                suffix_parts.append(f"r{extra_kwargs['low_rank_rank']}")
+            if "svd_top_k" in extra_kwargs:
+                suffix_parts.append(f"k{extra_kwargs['svd_top_k']}")
+            variant_suffix = ("_" + "_".join(suffix_parts)) if suffix_parts else ""
 
-        model, inject_stats = inject_noise(model, noise_cfg, seed=args.seed)
+            model.load_state_dict(original_state)
 
-        results = evaluate_all_subjects(model, tokenizer, subjects, max_samples)
-        mean_acc = results["_overall"]["mean_accuracy"]
-        delta = mean_acc - baseline_acc
+            model, inject_stats = inject_noise(model, noise_cfg, seed=args.seed)
 
-        config_key = f"{noise_type}_s{scale}_{layer_group_name}"
-        all_results[config_key] = {
-            "noise_type": noise_type,
-            "scale": scale,
-            "layer_group": layer_group_name,
-            "inject_stats": {k: v for k, v in inject_stats.items() if k != "snr_values"},
-            "mean_accuracy": mean_acc,
-            "delta_from_baseline": delta,
-            "per_subject": results,
-        }
+            results = evaluate_all_subjects(model, tokenizer, subjects, max_samples)
+            mean_acc = results["_overall"]["mean_accuracy"]
+            delta = mean_acc - baseline_acc
 
-        improved_subjects = []
-        degraded_subjects = []
-        for subject in subjects:
-            base_acc = baseline.get(subject, {}).get("accuracy", 0)
-            new_acc = results.get(subject, {}).get("accuracy", 0)
-            if new_acc > base_acc + 0.02:
-                improved_subjects.append((subject, new_acc - base_acc))
-            elif new_acc < base_acc - 0.02:
-                degraded_subjects.append((subject, base_acc - new_acc))
+            config_key = f"{noise_type}_s{scale}_{layer_group_name}{variant_suffix}"
+            all_results[config_key] = {
+                "noise_type": noise_type,
+                "scale": scale,
+                "layer_group": layer_group_name,
+                "extra_kwargs": extra_kwargs,
+                "inject_stats": {k: v for k, v in inject_stats.items() if k != "snr_values"},
+                "mean_accuracy": mean_acc,
+                "delta_from_baseline": delta,
+                "per_subject": results,
+            }
 
-        all_results[config_key]["improved_subjects"] = improved_subjects
-        all_results[config_key]["degraded_subjects"] = degraded_subjects
+            improved_subjects = []
+            degraded_subjects = []
+            for subject in subjects:
+                base_acc = baseline.get(subject, {}).get("accuracy", 0)
+                new_acc = results.get(subject, {}).get("accuracy", 0)
+                if new_acc > base_acc + 0.02:
+                    improved_subjects.append((subject, new_acc - base_acc))
+                elif new_acc < base_acc - 0.02:
+                    degraded_subjects.append((subject, base_acc - new_acc))
 
-        logger.info(
-            "  Mean acc: %.4f (delta: %+.4f), improved: %d, degraded: %d",
-            mean_acc, delta, len(improved_subjects), len(degraded_subjects),
-        )
+            all_results[config_key]["improved_subjects"] = improved_subjects
+            all_results[config_key]["degraded_subjects"] = degraded_subjects
 
-        for subject, improvement in improved_subjects:
-            if subject not in best_configs or improvement > best_configs[subject]["improvement"]:
-                best_configs[subject] = {
-                    "config_key": config_key,
-                    "noise_type": noise_type,
-                    "scale": scale,
-                    "layer_group": layer_group_name,
-                    "improvement": improvement,
-                }
+            logger.info(
+                "  Mean acc: %.4f (delta: %+.4f), improved: %d, degraded: %d",
+                mean_acc, delta, len(improved_subjects), len(degraded_subjects),
+            )
+
+            for subject, improvement in improved_subjects:
+                if subject not in best_configs or improvement > best_configs[subject]["improvement"]:
+                    best_configs[subject] = {
+                        "config_key": config_key,
+                        "noise_type": noise_type,
+                        "scale": scale,
+                        "layer_group": layer_group_name,
+                        "extra_kwargs": extra_kwargs,
+                        "improvement": improvement,
+                    }
 
     model.load_state_dict(original_state)
 
