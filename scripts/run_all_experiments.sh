@@ -63,50 +63,78 @@ if ! is_phase_done 2; then
     phase_done 2
 fi
 
-# Stage 3: Noise-Guided SFT (4 strategies × 4 domains × 2 seeds)
+# Stage 3: Noise-Guided SFT (4 strategies × 4 domains × 2 seeds) — one GPU per seed
 if ! is_phase_done 3; then
-    echo "[Stage 3/5] Noise-Guided SFT"
+    echo "[Stage 3/5] Noise-Guided SFT (parallel seeds)"
+    PIDS=()
+    GPU_IDX=0
     for SEED in "${SEEDS[@]}"; do
-        echo "  Seed: ${SEED}"
-        python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
+        G=$((GPU_IDX % NUM_GPUS))
+        echo "  Seed: ${SEED} on GPU ${G}"
+        CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
             --config_path "${CONFIG}" --noise_results "${SEARCH_RESULTS}" \
             --output_dir "${RESULTS}/noise_guided_sft" \
             --domains "${DOMAINS[@]}" --strategies "${STRATEGIES[@]}" \
             --seed "$SEED" \
-            2>&1 | tee "${LOG_DIR}/stage3_sft_seed${SEED}.log"
+            > "${LOG_DIR}/stage3_sft_seed${SEED}.log" 2>&1 &
+        PIDS+=($!)
+        GPU_IDX=$((GPU_IDX + 1))
+    done
+    for pid in "${PIDS[@]}"; do
+        wait "$pid" || exit 1
     done
     phase_done 3
 fi
 
-# Stage 4: Domain Evaluation
-if ! is_phase_done 4; then
-    echo "[Stage 4/5] Domain Evaluation"
-    for DOMAIN in "${DOMAINS[@]}"; do
-        echo "  Evaluating domain: ${DOMAIN}"
-        MODEL_PATHS="baseline:${MODEL_BASE}"
-        for STRAT in "${STRATEGIES[@]}"; do
-            CKPT="${RESULTS}/noise_guided_sft/${DOMAIN}/${STRAT}/seed42"
-            if [ -d "$CKPT" ]; then
-                MODEL_PATHS="${MODEL_PATHS} ${STRAT}:${CKPT}"
-            fi
-        done
-        python "${SCRIPT_DIR}/eval_domain_performance.py" \
-            --config_path "${CONFIG}" --model_paths ${MODEL_PATHS} \
-            --output_dir "${RESULTS}/domain_eval/${DOMAIN}" \
-            --base_model "${MODEL_BASE}" --domains "${DOMAIN}" mmlu --max_samples 200 \
-            2>&1 | tee "${LOG_DIR}/stage4_eval_${DOMAIN}.log"
-    done
-    phase_done 4
-fi
+# Stage 4 + Stage 5: domain eval (one GPU per domain) runs in parallel with 27B Fisher validation
+if ! is_phase_done 4 || ! is_phase_done 5; then
+    echo "[Stages 4+5] Domain evaluation + 27B validation (parallel)"
+    P4_PIDS=()
+    GPU_IDX=0
 
-# Stage 5: 27B Validation
-if ! is_phase_done 5; then
-    echo "[Stage 5/5] 27B Validation"
-    python "${SCRIPT_DIR}/run_fisher_analysis.py" \
-        --config_path "${CONFIG}" --output_dir "${RESULTS}/fisher_analysis_27b" \
-        --noise_type gaussian --noise_scale 0.01 --num_samples 100 \
-        2>&1 | tee "${LOG_DIR}/stage5_27b.log" || echo "  27B validation skipped (insufficient memory)"
-    phase_done 5
+    if ! is_phase_done 4; then
+        for DOMAIN in "${DOMAINS[@]}"; do
+            G=$((GPU_IDX % NUM_GPUS))
+            echo "  Evaluating domain: ${DOMAIN} on GPU ${G}"
+            MODEL_PATHS="baseline:${MODEL_BASE}"
+            for STRAT in "${STRATEGIES[@]}"; do
+                CKPT="${RESULTS}/noise_guided_sft/${DOMAIN}/${STRAT}/seed42"
+                if [ -d "$CKPT" ]; then
+                    MODEL_PATHS="${MODEL_PATHS} ${STRAT}:${CKPT}"
+                fi
+            done
+            CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/eval_domain_performance.py" \
+                --config_path "${CONFIG}" --model_paths ${MODEL_PATHS} \
+                --output_dir "${RESULTS}/domain_eval/${DOMAIN}" \
+                --base_model "${MODEL_BASE}" --domains "${DOMAIN}" mmlu --max_samples 200 \
+                > "${LOG_DIR}/stage4_eval_${DOMAIN}.log" 2>&1 &
+            P4_PIDS+=($!)
+            GPU_IDX=$((GPU_IDX + 1))
+        done
+    fi
+
+    P5_PID=""
+    if ! is_phase_done 5; then
+        G=$((GPU_IDX % NUM_GPUS))
+        echo "  27B validation on GPU ${G}"
+        CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_fisher_analysis.py" \
+            --config_path "${CONFIG}" --output_dir "${RESULTS}/fisher_analysis_27b" \
+            --noise_type gaussian --noise_scale 0.01 --num_samples 100 \
+            > "${LOG_DIR}/stage5_27b.log" 2>&1 &
+        P5_PID=$!
+    fi
+
+    FAIL4=0
+    for pid in "${P4_PIDS[@]}"; do
+        wait "$pid" || FAIL4=1
+    done
+    if [ -n "$P5_PID" ]; then
+        wait "$P5_PID" || echo "  27B validation skipped (insufficient memory)"
+    fi
+    [ "$FAIL4" -eq 0 ] || exit 1
+
+    if ! is_phase_done 4; then phase_done 4; fi
+    if ! is_phase_done 5; then phase_done 5; fi
 fi
 
 echo "========================================="
