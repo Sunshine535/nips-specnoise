@@ -49,7 +49,11 @@ def load_cfg(path):
 
 def load_model(label, path, base_model=None):
     """Load model, trying LoRA adapter first, then standalone."""
-    tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True, padding_side="left")
+    try:
+        tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True, padding_side="left")
+    except Exception:
+        tok_path = base_model if base_model else path
+        tok = AutoTokenizer.from_pretrained(tok_path, trust_remote_code=True, padding_side="left")
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
 
