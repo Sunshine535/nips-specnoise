@@ -76,7 +76,6 @@ def get_layer_param_groups(model):
     return dict(groups)
 
 
-@torch.no_grad()
 def compute_diagonal_fisher(model, tokenizer, texts, max_length=256):
     """Estimate diagonal Fisher information via gradient squared averages."""
     model.eval()
@@ -85,11 +84,12 @@ def compute_diagonal_fisher(model, tokenizer, texts, max_length=256):
         if param.requires_grad and param.dim() == 2:
             fisher[name] = torch.zeros_like(param, dtype=torch.float32)
 
+    device = next(model.parameters()).device
     model.train()
     n_samples = 0
     for text in tqdm(texts, desc="Computing Fisher"):
         inputs = tokenizer(text, return_tensors="pt", truncation=True,
-                           max_length=max_length).to(model.device)
+                           max_length=max_length).to(device)
         if inputs["input_ids"].shape[1] < 2:
             continue
         model.zero_grad()
@@ -205,6 +205,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
         attn_implementation="flash_attention_2",
+        device_map="auto",
     )
 
     logger.info("Loading text samples for Fisher estimation")

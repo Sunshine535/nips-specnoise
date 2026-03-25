@@ -238,6 +238,7 @@ def run_strategy(strategy, model_name, noise_config, dataset, out_dir, args):
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
         attn_implementation="flash_attention_2",
+        device_map={"": 0},
     )
 
     orig_state = {n: p.data.clone().cpu()

@@ -63,30 +63,48 @@ if ! is_phase_done 2; then
     phase_done 2
 fi
 
-# Stage 3: Noise-Guided SFT (4 strategies × 4 domains × 2 seeds) — one GPU per seed
+# Stage 3: Noise-Guided SFT (4 strategies × 4 domains × 2 seeds) — one GPU per job
 if ! is_phase_done 3; then
-    echo "[Stage 3/5] Noise-Guided SFT (parallel seeds)"
-    PIDS=()
-    GPU_IDX=0
+    echo "[Stage 3/5] Noise-Guided SFT (full ${NUM_GPUS}-GPU parallel)"
+
+    JOBS=()
     for SEED in "${SEEDS[@]}"; do
-        G=$((GPU_IDX % NUM_GPUS))
-        echo "  Seed: ${SEED} on GPU ${G}"
-        CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
-            --config_path "${CONFIG}" --noise_results "${SEARCH_RESULTS}" \
-            --output_dir "${RESULTS}/noise_guided_sft" \
-            --domains "${DOMAINS[@]}" --strategies "${STRATEGIES[@]}" \
-            --seed "$SEED" \
-            > "${LOG_DIR}/stage3_sft_seed${SEED}.log" 2>&1 &
-        PIDS+=($!)
-        GPU_IDX=$((GPU_IDX + 1))
+        for DOMAIN in "${DOMAINS[@]}"; do
+            for STRAT in "${STRATEGIES[@]}"; do
+                JOBS+=("${SEED}:${DOMAIN}:${STRAT}")
+            done
+        done
     done
-    for pid in "${PIDS[@]}"; do
-        wait "$pid" || exit 1
+    echo "  Total SFT jobs: ${#JOBS[@]}, GPUs: ${NUM_GPUS}"
+
+    FAIL3=0
+    for ((batch_start=0; batch_start < ${#JOBS[@]}; batch_start+=NUM_GPUS)); do
+        PIDS=()
+        batch_end=$((batch_start + NUM_GPUS))
+        [ "$batch_end" -gt "${#JOBS[@]}" ] && batch_end=${#JOBS[@]}
+
+        for ((i=batch_start; i < batch_end; i++)); do
+            IFS=':' read -r SEED DOMAIN STRAT <<< "${JOBS[$i]}"
+            G=$(( i - batch_start ))
+            echo "  [$((i+1))/${#JOBS[@]}] GPU ${G}: seed=${SEED} domain=${DOMAIN} strategy=${STRAT}"
+            CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
+                --config_path "${CONFIG}" --noise_results "${SEARCH_RESULTS}" \
+                --output_dir "${RESULTS}/noise_guided_sft" \
+                --domains "$DOMAIN" --strategies "$STRAT" \
+                --seed "$SEED" \
+                > "${LOG_DIR}/stage3_sft_${DOMAIN}_${STRAT}_seed${SEED}.log" 2>&1 &
+            PIDS+=($!)
+        done
+
+        for pid in "${PIDS[@]}"; do
+            wait "$pid" || FAIL3=1
+        done
+        [ "$FAIL3" -eq 0 ] || exit 1
     done
     phase_done 3
 fi
 
-# Stage 4 + Stage 5: domain eval (one GPU per domain) runs in parallel with 27B Fisher validation
+# Stage 4 + Stage 5: domain eval (one GPU per domain) + 27B Fisher validation (remaining GPUs)
 if ! is_phase_done 4 || ! is_phase_done 5; then
     echo "[Stages 4+5] Domain evaluation + 27B validation (parallel)"
     P4_PIDS=()
@@ -115,9 +133,14 @@ if ! is_phase_done 4 || ! is_phase_done 5; then
 
     P5_PID=""
     if ! is_phase_done 5; then
-        G=$((GPU_IDX % NUM_GPUS))
-        echo "  27B validation on GPU ${G}"
-        CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_fisher_analysis.py" \
+        REMAINING_GPUS=""
+        for ((g=GPU_IDX; g<NUM_GPUS; g++)); do
+            [ -n "$REMAINING_GPUS" ] && REMAINING_GPUS="${REMAINING_GPUS},"
+            REMAINING_GPUS="${REMAINING_GPUS}${g}"
+        done
+        [ -z "$REMAINING_GPUS" ] && REMAINING_GPUS="$((NUM_GPUS - 1))"
+        echo "  27B validation on GPUs ${REMAINING_GPUS}"
+        CUDA_VISIBLE_DEVICES=$REMAINING_GPUS python "${SCRIPT_DIR}/run_fisher_analysis.py" \
             --config_path "${CONFIG}" --output_dir "${RESULTS}/fisher_analysis_27b" \
             --noise_type gaussian --noise_scale 0.01 --num_samples 100 \
             > "${LOG_DIR}/stage5_27b.log" 2>&1 &
