@@ -26,6 +26,7 @@ from src.noise_injection import (
     NoiseRegularizer,
     NoiseType,
     inject_noise,
+    resolve_attn_implementation,
 )
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -170,7 +171,7 @@ def main():
     model = AutoModelForCausalLM.from_pretrained(
         cfg["model"]["name_or_path"],
         torch_dtype=getattr(torch, cfg["model"]["torch_dtype"]),
-        attn_implementation=cfg["model"].get("attn_implementation", "flash_attention_2"),
+        attn_implementation=resolve_attn_implementation(cfg["model"].get("attn_implementation", "flash_attention_2")),
         trust_remote_code=True,
     ).cuda()
 

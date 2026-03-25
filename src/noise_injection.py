@@ -216,3 +216,15 @@ class NoiseRegularizer:
                 reg_loss += (param - ref).pow(2).sum()
                 count += 1
         return self.weight * reg_loss / max(count, 1)
+
+
+def resolve_attn_implementation(preferred: str = "flash_attention_2") -> str:
+    """Return *preferred* if flash_attn is importable, else fall back to sdpa."""
+    if preferred != "flash_attention_2":
+        return preferred
+    try:
+        import flash_attn  # noqa: F401
+        return "flash_attention_2"
+    except ImportError:
+        logger.warning("flash_attn not installed, falling back to sdpa")
+        return "sdpa"

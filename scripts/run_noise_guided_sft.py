@@ -30,6 +30,7 @@ from trl import SFTConfig, SFTTrainer
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.noise_injection import (
     NoiseConfig, NoiseRegularizer, NoiseType, inject_noise,
+    resolve_attn_implementation,
 )
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -237,7 +238,7 @@ def run_strategy(strategy, model_name, noise_config, dataset, out_dir, args):
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
-        attn_implementation="flash_attention_2",
+        attn_implementation=resolve_attn_implementation(),
     ).cuda()
 
     orig_state = {n: p.data.clone().cpu()

@@ -22,7 +22,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.noise_injection import NoiseConfig, NoiseType, inject_noise
+from src.noise_injection import NoiseConfig, NoiseType, inject_noise, resolve_attn_implementation
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -251,7 +251,7 @@ def main():
         torch_dtype=getattr(torch, cfg["model"]["torch_dtype"]),
         device_map="auto",
         trust_remote_code=True,
-        attn_implementation=cfg["model"].get("attn_implementation", "flash_attention_2"),
+        attn_implementation=resolve_attn_implementation(cfg["model"].get("attn_implementation", "flash_attention_2")),
     )
     model.eval()
 

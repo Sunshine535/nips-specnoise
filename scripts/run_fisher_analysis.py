@@ -26,7 +26,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.noise_injection import NoiseConfig, NoiseType, inject_noise
+from src.noise_injection import NoiseConfig, NoiseType, inject_noise, resolve_attn_implementation
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -202,7 +202,7 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
-        attn_implementation="flash_attention_2",
+        attn_implementation=resolve_attn_implementation(),
     ).cuda()
 
     logger.info("Loading text samples for Fisher estimation")
