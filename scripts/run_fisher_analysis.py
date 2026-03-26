@@ -26,7 +26,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.noise_injection import NoiseConfig, NoiseType, inject_noise
+from src.noise_injection import NoiseConfig, NoiseType, inject_noise, resolve_attn_implementation
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
@@ -85,7 +85,6 @@ def compute_diagonal_fisher(model, tokenizer, texts, max_length=256):
             fisher[name] = torch.zeros_like(param, dtype=torch.float32)
 
     device = next(model.parameters()).device
-    model.train()
     n_samples = 0
     for text in tqdm(texts, desc="Computing Fisher"):
         inputs = tokenizer(text, return_tensors="pt", truncation=True,
@@ -104,7 +103,6 @@ def compute_diagonal_fisher(model, tokenizer, texts, max_length=256):
     for name in fisher:
         fisher[name] /= max(n_samples, 1)
 
-    model.eval()
     return fisher
 
 
@@ -204,9 +202,8 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype=torch.bfloat16, trust_remote_code=True,
-        attn_implementation="flash_attention_2",
-        device_map="auto",
-    )
+        attn_implementation=resolve_attn_implementation(),
+    ).cuda()
 
     logger.info("Loading text samples for Fisher estimation")
     try:

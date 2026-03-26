@@ -77,9 +77,9 @@ if ! is_phase_done 3; then
     done
     echo "  Total SFT jobs: ${#JOBS[@]}, GPUs: ${NUM_GPUS}"
 
-    FAIL3=0
     for ((batch_start=0; batch_start < ${#JOBS[@]}; batch_start+=NUM_GPUS)); do
         PIDS=()
+        FAIL3=0
         batch_end=$((batch_start + NUM_GPUS))
         [ "$batch_end" -gt "${#JOBS[@]}" ] && batch_end=${#JOBS[@]}
 
@@ -99,7 +99,7 @@ if ! is_phase_done 3; then
         for pid in "${PIDS[@]}"; do
             wait "$pid" || FAIL3=1
         done
-        [ "$FAIL3" -eq 0 ] || exit 1
+        [ "$FAIL3" -eq 0 ] || { echo "  [ERROR] Batch starting at $((batch_start+1)) failed. Check logs."; exit 1; }
     done
     phase_done 3
 fi
