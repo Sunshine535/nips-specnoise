@@ -86,8 +86,9 @@ if ! is_phase_done 3; then
         for ((i=batch_start; i < batch_end; i++)); do
             IFS=':' read -r SEED DOMAIN STRAT <<< "${JOBS[$i]}"
             G=$(( i - batch_start ))
-            echo "  [$((i+1))/${#JOBS[@]}] GPU ${G}: seed=${SEED} domain=${DOMAIN} strategy=${STRAT}"
-            CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
+            PHYS_G=$(gpu_at_index $G)
+            echo "  [$((i+1))/${#JOBS[@]}] GPU ${PHYS_G}: seed=${SEED} domain=${DOMAIN} strategy=${STRAT}"
+            CUDA_VISIBLE_DEVICES=$PHYS_G python "${SCRIPT_DIR}/run_noise_guided_sft.py" \
                 --config_path "${CONFIG}" --noise_results "${SEARCH_RESULTS}" \
                 --output_dir "${RESULTS}/noise_guided_sft" \
                 --domains "$DOMAIN" --strategies "$STRAT" \
@@ -113,7 +114,8 @@ if ! is_phase_done 4 || ! is_phase_done 5; then
     if ! is_phase_done 4; then
         for DOMAIN in "${DOMAINS[@]}"; do
             G=$((GPU_IDX % NUM_GPUS))
-            echo "  Evaluating domain: ${DOMAIN} on GPU ${G}"
+            PHYS_G=$(gpu_at_index $G)
+            echo "  Evaluating domain: ${DOMAIN} on GPU ${PHYS_G}"
             MODEL_PATHS="baseline:${MODEL_BASE}"
             for STRAT in "${STRATEGIES[@]}"; do
                 CKPT="${RESULTS}/noise_guided_sft/${DOMAIN}/${STRAT}/seed42"
@@ -121,7 +123,7 @@ if ! is_phase_done 4 || ! is_phase_done 5; then
                     MODEL_PATHS="${MODEL_PATHS} ${STRAT}:${CKPT}"
                 fi
             done
-            CUDA_VISIBLE_DEVICES=$G python "${SCRIPT_DIR}/eval_domain_performance.py" \
+            CUDA_VISIBLE_DEVICES=$PHYS_G python "${SCRIPT_DIR}/eval_domain_performance.py" \
                 --config_path "${CONFIG}" --model_paths ${MODEL_PATHS} \
                 --output_dir "${RESULTS}/domain_eval/${DOMAIN}" \
                 --base_model "${MODEL_BASE}" --domains "${DOMAIN}" mmlu --max_samples 200 \
@@ -135,10 +137,11 @@ if ! is_phase_done 4 || ! is_phase_done 5; then
     if ! is_phase_done 5; then
         REMAINING_GPUS=""
         for ((g=GPU_IDX; g<NUM_GPUS; g++)); do
+            local_g=$(gpu_at_index $g)
             [ -n "$REMAINING_GPUS" ] && REMAINING_GPUS="${REMAINING_GPUS},"
-            REMAINING_GPUS="${REMAINING_GPUS}${g}"
+            REMAINING_GPUS="${REMAINING_GPUS}${local_g}"
         done
-        [ -z "$REMAINING_GPUS" ] && REMAINING_GPUS="$((NUM_GPUS - 1))"
+        [ -z "$REMAINING_GPUS" ] && REMAINING_GPUS="$(gpu_at_index $((NUM_GPUS - 1)))"
         echo "  27B validation on GPUs ${REMAINING_GPUS}"
         CUDA_VISIBLE_DEVICES=$REMAINING_GPUS python "${SCRIPT_DIR}/run_fisher_analysis.py" \
             --config_path "${CONFIG}" --output_dir "${RESULTS}/fisher_analysis_27b" \
