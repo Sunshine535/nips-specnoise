@@ -28,7 +28,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.noise_injection import NoiseConfig, NoiseType, inject_noise, resolve_attn_implementation
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 logging.basicConfig(
     level=logging.INFO,

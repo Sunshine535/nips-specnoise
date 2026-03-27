@@ -19,7 +19,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 import yaml
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 logging.basicConfig(
     level=logging.INFO,
