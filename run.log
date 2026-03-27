@@ -881,3 +881,7 @@ Retrying in 4s [Retry 3/5].
 2026-03-28 00:04:54,590 [WARNING] huggingface_hub.utils._http: '' thrown while requesting HEAD https://hf-mirror.com/datasets/cais/mmlu/resolve/c30699e8356da336a370243923dbaf21066bb9fe/.huggingface.yaml
 Retrying in 8s [Retry 4/5].
 2026-03-28 00:04:54,590 [WARNING] huggingface_hub.utils._http: Retrying in 8s [Retry 4/5].
+'' thrown while requesting HEAD https://hf-mirror.com/datasets/cais/mmlu/resolve/c30699e8356da336a370243923dbaf21066bb9fe/.huggingface.yaml
+2026-03-28 00:06:02,599 [WARNING] huggingface_hub.utils._http: '' thrown while requesting HEAD https://hf-mirror.com/datasets/cais/mmlu/resolve/c30699e8356da336a370243923dbaf21066bb9fe/.huggingface.yaml
+Retrying in 8s [Retry 5/5].
+2026-03-28 00:06:02,599 [WARNING] huggingface_hub.utils._http: Retrying in 8s [Retry 5/5].
