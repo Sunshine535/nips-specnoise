@@ -7,6 +7,7 @@ then fine-tunes with TRL SFTTrainer while regularizing toward the noise-augmente
 """
 
 import argparse
+import glob
 import json
 import logging
 import os
@@ -37,6 +38,13 @@ logging.basicConfig(
 logger = logging.getLogger("noise_guided_sft")
 
 
+def find_latest_checkpoint(output_dir):
+    """Find the latest checkpoint directory in output_dir."""
+    ckpts = sorted(glob.glob(os.path.join(output_dir, "checkpoint-*")),
+                   key=lambda x: int(x.split("-")[-1]) if x.split("-")[-1].isdigit() else 0)
+    return ckpts[-1] if ckpts else None
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Noise-Guided SFT")
     parser.add_argument("--config_path", type=str, required=True)
@@ -50,6 +58,8 @@ def parse_args():
     parser.add_argument("--noise_layer_group", type=str, default=None)
     parser.add_argument("--no_regularization", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resume_from_checkpoint", type=str, default="auto",
+                        help="Resume from checkpoint. 'auto' finds latest, path for specific, 'none' to disable")
     parser.add_argument("--local_rank", type=int, default=-1)
     return parser.parse_args()
 
@@ -217,8 +227,17 @@ def main():
         noise_regularizer=noise_regularizer,
     )
 
+    resume_ckpt = None
+    if args.resume_from_checkpoint != "none":
+        if args.resume_from_checkpoint == "auto":
+            resume_ckpt = find_latest_checkpoint(output_dir)
+        else:
+            resume_ckpt = args.resume_from_checkpoint
+        if resume_ckpt:
+            logger.info("Resuming from checkpoint: %s", resume_ckpt)
+
     logger.info("Starting noise-guided SFT")
-    train_result = trainer.train()
+    train_result = trainer.train(resume_from_checkpoint=resume_ckpt)
 
     logger.info("Saving model to %s", output_dir)
     trainer.save_model(output_dir)

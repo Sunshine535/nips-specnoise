@@ -14,6 +14,8 @@ if [ -f "$PROJ_DIR_ROOT/.venv/bin/activate" ]; then
 fi
 export PATH="$HOME/.local/bin:$PATH"
 
+TORCHRUN=$(get_torchrun_cmd)
+
 # --- Phase resume ---
 PHASE_MARKER_DIR="$PROJ_DIR_ROOT/results/.phase_markers"
 mkdir -p "$PHASE_MARKER_DIR"
